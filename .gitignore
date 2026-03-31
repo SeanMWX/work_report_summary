@@ -4,6 +4,7 @@ __pycache__/
 *.skill
 .tmp_init/
 dist/
+test/
 test/data/
 *.db
 *.sqlite

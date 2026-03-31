@@ -1,6 +1,6 @@
 ---
 name: work_report_summary
-description: Record daily work items in a local SQLite database, replace a day's report when the user wants to correct it, edit or delete one logged task by entry id, track entry history, inspect the historical changes for a specific report date, and retrieve daily or weekly progress summaries. Use when the user asks Codex to log completed work for a day, modify an existing daily report, update or delete a single logged task, inspect version history, inspect date-level history, look up what they worked on on a specific date, or summarize progress for the current or requested week.
+description: Record daily work items in a local SQLite database, including structured project and category fields, replace a day's report when the user wants to correct it, edit or delete one logged task by entry id, track entry history, inspect the historical changes for a specific report date, and retrieve daily or weekly progress summaries. Use when the user asks Codex to log completed work for a day, classify work by project or category, modify an existing daily report, update or delete a single logged task, inspect version history, inspect date-level history, look up what they worked on on a specific date, or summarize progress for the current or requested week.
 ---
 
 # Work Report Summary
@@ -21,6 +21,9 @@ queried later for exact daily or weekly summaries.
    Use `task` as required.
    Use `status` only when the user indicates `done`, `in_progress`, or
    `blocked`.
+   Use `project` when the work belongs to a named project.
+   Use `category` for work type such as research, course-learning, development,
+   communication, or operations.
    Use `details` for brief outcome or blocker context.
 4. Run the runtime script:
    - `record` to append entries for a day
@@ -38,6 +41,8 @@ queried later for exact daily or weekly summaries.
 
 - Split multiple tasks into separate items before calling `record`.
 - Default `status` to `done` when the user simply says they finished something.
+- Capture `project` and `category` whenever the user provides them or they are
+  clear from the request context.
 - Preserve short evidence in `details` when the user mentions outcome, link, or
   blocker context.
 - Run one `record` command per date when the user gives updates for multiple
@@ -51,16 +56,16 @@ queried later for exact daily or weekly summaries.
   calling `update-entry`.
 - Use `delete-entry` when the user wants to remove one mistaken task while
   leaving the rest of the day unchanged.
-- Use `entry-history` when the user asks what changed, wants an audit trail, or
-  needs to inspect versions after an update or deletion.
-- Use `day-history` when the user asks how a day's report changed over time, or
-  wants to review all historical edits related to one report date.
 
 ## Reporting Rules
 
 - Use `day-report` for one explicit date.
 - Use `week-report` for "this week" or any request anchored to a date inside the
   requested week.
+- Use `entry-history` when the user asks what changed for one task, wants an
+  audit trail, or needs to inspect versions after an update or deletion.
+- Use `day-history` when the user asks how a day's report changed over time, or
+  wants to review all historical edits related to one report date.
 - When the user writes in Chinese, prefer the response shapes in
   `{baseDir}/references/chinese_output.md`.
 - Mention the exact date or week range in the final answer.
@@ -74,6 +79,6 @@ queried later for exact daily or weekly summaries.
 - Read `{baseDir}/references/chat_reference.md` for example user prompts and
   command selection patterns.
 - Read `{baseDir}/references/chinese_output.md` for concise Chinese response
-  templates for record confirmations, single-entry updates, deletions, history
-  queries, date-history queries, report corrections, daily queries, and weekly
-  summaries.
+  templates for record confirmations, classification-aware summaries, single-entry
+  updates, deletions, history queries, date-history queries, daily queries, and
+  weekly summaries.

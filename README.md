@@ -2,8 +2,8 @@
 
 Local OpenClaw skill for recording daily work items into SQLite, correcting a
 day's report when needed, editing or deleting one specific logged task by entry
-id, tracking entry history, and producing deterministic daily or weekly
-summaries.
+id, tracking entry history, inspecting date-level history, and producing
+deterministic daily or weekly summaries.
 
 ## Runtime Files
 
@@ -18,6 +18,14 @@ summaries.
 The runtime script stores data in `~/.work_report_summary/<db_name>.db` by
 default. Use `default.db` unless the user asks for a separate database name or
 path.
+
+Each task now supports these structured fields:
+
+- `task`
+- `status`
+- `project`
+- `category`
+- `details`
 
 To correct an existing daily report, use `replace-day` to replace the full set
 of items for that date.

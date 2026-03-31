@@ -15,6 +15,13 @@
 2. {task_2}
 ```
 
+如果有项目或分类，补充：
+
+```text
+- 项目：{project}
+- 分类：{category}
+```
+
 如果存在非 `done` 状态，补充状态说明：
 
 ```text
@@ -54,6 +61,18 @@
 - 状态：{status}
 ```
 
+如果 `project` 非空，再补一行：
+
+```text
+- 项目：{project}
+```
+
+如果 `category` 非空，再补一行：
+
+```text
+- 分类：{category}
+```
+
 如果 `details` 非空，再补一行：
 
 ```text
@@ -72,6 +91,8 @@
 - 事项：{task}
 ```
 
+如果 `project` 或 `category` 非空，也可附带说明。
+
 ## 历史版本查询
 
 适用于 `entry-history`。
@@ -82,6 +103,13 @@
 任务 #{entry_id} 共记录了 {version_count} 个版本：
 1. v{version} {action} {date} {task}
 2. v{version} {action} {date} {task}
+```
+
+如果版本里有项目或分类变更，可以补充：
+
+```text
+- 项目：{project}
+- 分类：{category}
 ```
 
 如果该任务已经被删除，可以补一句：
@@ -101,6 +129,13 @@
 1. 任务 #{entry_id}
 - v{version} {action} {task}
 - v{version} {action} {task}
+```
+
+如果有聚合统计，可补充：
+
+```text
+- 项目分布：{project_counts}
+- 分类分布：{category_counts}
 ```
 
 如果某条任务当前已被删除，可以补一句：
@@ -126,6 +161,13 @@
 1. {task}（已完成）
 2. {task}（进行中）
 3. {task}（阻塞：{details}）
+```
+
+如果有结构化字段，可补充：
+
+```text
+- 项目分布：{project_counts}
+- 分类分布：{category_counts}
 ```
 
 无记录时：
@@ -154,6 +196,8 @@
 - 已完成：{done_count}
 - 进行中：{in_progress_count}
 - 阻塞：{blocked_count}
+- 项目分布：{project_counts}
+- 分类分布：{category_counts}
 ```
 
 如果一周内某天没有记录，不必强行列出；只有在用户明确要求“按天全列”时再保留空天。

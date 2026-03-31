@@ -34,11 +34,15 @@ Or structured objects:
   {
     "task": "Reviewed PR 42",
     "status": "blocked",
+    "project": "checkout-revamp",
+    "category": "research",
     "details": "Waiting for QA sign-off"
   },
   {
     "task": "Updated runbook",
-    "status": "done"
+    "status": "done",
+    "project": "platform-ops",
+    "category": "operations"
   }
 ]
 ```
@@ -48,6 +52,14 @@ Supported statuses:
 - `done`
 - `in_progress`
 - `blocked`
+
+Recommended category examples:
+
+- `research`
+- `course-learning`
+- `development`
+- `communication`
+- `operations`
 
 For `record`, the array must be non-empty.
 For `replace-day`, the array may be empty when the user wants to clear that
@@ -67,7 +79,7 @@ Record work items:
 python {baseDir}/scripts/work_report_summary.py record \
   --date 2026-03-31 \
   --db-name team_alpha \
-  --items-json '[{"task":"Closed onboarding checklist"},{"task":"Reviewed PR 42","status":"blocked","details":"Waiting for QA"}]'
+  --items-json '[{"task":"Closed onboarding checklist","project":"onboarding-refresh","category":"development"},{"task":"Reviewed PR 42","status":"blocked","project":"checkout-revamp","category":"research","details":"Waiting for QA"}]'
 ```
 
 Replace one day's report:
@@ -76,7 +88,7 @@ Replace one day's report:
 python {baseDir}/scripts/work_report_summary.py replace-day \
   --date 2026-03-31 \
   --db-name team_alpha \
-  --items-json '[{"task":"Rewrote release notes"},{"task":"Retested login flow","status":"in_progress"}]'
+  --items-json '[{"task":"Rewrote release notes","project":"release-2026-04","category":"communication"},{"task":"Retested login flow","status":"in_progress","project":"auth-stability","category":"development"}]'
 ```
 
 Update one specific entry:
@@ -86,7 +98,19 @@ python {baseDir}/scripts/work_report_summary.py update-entry \
   --db-name team_alpha \
   --entry-id 42 \
   --status done \
-  --details 'QA sign-off completed'
+  --project auth-stability \
+  --category development \
+  --details "QA sign-off completed"
+```
+
+Clear project or category on one entry:
+
+```bash
+python {baseDir}/scripts/work_report_summary.py update-entry \
+  --db-name team_alpha \
+  --entry-id 42 \
+  --clear-project \
+  --clear-category
 ```
 
 Move one entry to another date:
@@ -152,7 +176,7 @@ Override the full database path:
 ```bash
 python {baseDir}/scripts/work_report_summary.py record \
   --db-path ~/tmp/work/team_alpha.db \
-  --items-json '["Closed release checklist"]'
+  --items-json '[{"task":"Closed release checklist","project":"release-2026-04","category":"operations"}]'
 ```
 
 ## Output Fields
@@ -192,7 +216,10 @@ python {baseDir}/scripts/work_report_summary.py record \
 - `db_path`
 - `entry_id`
 - `current_exists`
+- `current_entry`
 - `version_count`
+- `project_counts`
+- `category_counts`
 - `versions`
 
 `day-history` returns:
@@ -202,6 +229,8 @@ python {baseDir}/scripts/work_report_summary.py record \
 - `entry_count`
 - `version_count`
 - `action_counts`
+- `project_counts`
+- `category_counts`
 - `entries`
 
 `day-report` returns:
@@ -210,6 +239,8 @@ python {baseDir}/scripts/work_report_summary.py record \
 - `date`
 - `entry_count`
 - `status_counts`
+- `project_counts`
+- `category_counts`
 - `entries`
 
 Each object in `entries` includes:
@@ -218,6 +249,8 @@ Each object in `entries` includes:
 - `date`
 - `task`
 - `status`
+- `project`
+- `category`
 - `details`
 - `created_at`
 
@@ -229,6 +262,8 @@ Each object in `entries` includes:
 - `week_end`
 - `entry_count`
 - `status_counts`
+- `project_counts`
+- `category_counts`
 - `days`
 
 Each object in `versions` includes:
@@ -241,6 +276,8 @@ Each object in `versions` includes:
 - `date`
 - `task`
 - `status`
+- `project`
+- `category`
 - `details`
 - `created_at`
 - `changed_at`
@@ -252,13 +289,26 @@ Each object in `entries` from `day-history` includes:
 - `current_entry`
 - `version_count`
 - `action_counts`
+- `project_counts`
+- `category_counts`
 - `versions`
+
+Each object in `days` from `week-report` includes:
+
+- `date`
+- `entry_count`
+- `status_counts`
+- `project_counts`
+- `category_counts`
+- `entries`
 
 ## Agent Notes
 
 - Prefer explicit dates over relative words when constructing commands.
 - Treat JSON output as the source of truth.
 - Report empty results directly instead of guessing unrecorded work.
+- When a user asks to classify work by project or type, store those values in
+  `project` and `category`.
 - When a user asks to fix an already logged day, prefer `replace-day` over
   appending more `record` items.
 - When a user asks to fix only one task, prefer `update-entry` after resolving

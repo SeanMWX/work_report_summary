@@ -20,6 +20,10 @@ DEFAULT_DB_NAME = "default"
 STATUS_ORDER = ("done", "in_progress", "blocked")
 DB_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 HISTORY_ACTIONS = ("create", "update", "delete")
+OPTIONAL_TEXT_COLUMNS = {
+    "project": "TEXT NOT NULL DEFAULT ''",
+    "category": "TEXT NOT NULL DEFAULT ''",
+}
 
 
 class CliError(Exception):
@@ -85,6 +89,28 @@ def connect_db(db_path: Path) -> sqlite3.Connection:
     return connection
 
 
+def get_table_columns(connection: sqlite3.Connection, table_name: str) -> set[str]:
+    rows = connection.execute("PRAGMA table_info({0})".format(table_name)).fetchall()
+    return {str(row["name"]) for row in rows}
+
+
+def ensure_table_columns(
+    connection: sqlite3.Connection,
+    table_name: str,
+    columns: Dict[str, str],
+) -> None:
+    existing_columns = get_table_columns(connection, table_name)
+    for column_name, column_definition in columns.items():
+        if column_name not in existing_columns:
+            connection.execute(
+                "ALTER TABLE {0} ADD COLUMN {1} {2}".format(
+                    table_name,
+                    column_name,
+                    column_definition,
+                )
+            )
+
+
 def ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(
         """
@@ -93,11 +119,14 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             work_date TEXT NOT NULL,
             task TEXT NOT NULL,
             status TEXT NOT NULL CHECK (status IN ('done', 'in_progress', 'blocked')),
+            project TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '',
             details TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL
         )
         """
     )
+    ensure_table_columns(connection, "work_entries", OPTIONAL_TEXT_COLUMNS)
     connection.execute(
         """
         CREATE INDEX IF NOT EXISTS idx_work_entries_work_date
@@ -115,12 +144,15 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             work_date TEXT NOT NULL,
             task TEXT NOT NULL,
             status TEXT NOT NULL CHECK (status IN ('done', 'in_progress', 'blocked')),
+            project TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '',
             details TEXT NOT NULL DEFAULT '',
             created_at TEXT NOT NULL,
             changed_at TEXT NOT NULL
         )
         """
     )
+    ensure_table_columns(connection, "work_entry_history", OPTIONAL_TEXT_COLUMNS)
     connection.execute(
         """
         CREATE UNIQUE INDEX IF NOT EXISTS idx_work_entry_history_entry_version
@@ -147,6 +179,8 @@ def backfill_history_for_existing_entries(connection: sqlite3.Connection) -> Non
             work_date,
             task,
             status,
+            project,
+            category,
             details,
             created_at,
             changed_at
@@ -159,6 +193,8 @@ def backfill_history_for_existing_entries(connection: sqlite3.Connection) -> Non
             work_entries.work_date,
             work_entries.task,
             work_entries.status,
+            work_entries.project,
+            work_entries.category,
             work_entries.details,
             work_entries.created_at,
             work_entries.created_at
@@ -177,7 +213,13 @@ def normalize_item(raw_item: Any, index: int) -> Dict[str, str]:
         task = raw_item.strip()
         if not task:
             raise CliError("Item {0} must not be empty.".format(index))
-        return {"task": task, "status": "done", "details": ""}
+        return {
+            "task": task,
+            "status": "done",
+            "project": "",
+            "category": "",
+            "details": "",
+        }
 
     if not isinstance(raw_item, dict):
         raise CliError("Item {0} must be either a string or an object.".format(index))
@@ -192,8 +234,16 @@ def normalize_item(raw_item: Any, index: int) -> Dict[str, str]:
             "Item {0} status must be one of: {1}.".format(index, ", ".join(STATUS_ORDER))
         )
 
+    project = str(raw_item.get("project", "") or "").strip()
+    category = str(raw_item.get("category", "") or "").strip()
     details = str(raw_item.get("details", "") or "").strip()
-    return {"task": task, "status": status, "details": details}
+    return {
+        "task": task,
+        "status": status,
+        "project": project,
+        "category": category,
+        "details": details,
+    }
 
 
 def normalize_task_text(raw_value: str) -> str:
@@ -207,6 +257,13 @@ def normalize_status_value(raw_value: str) -> str:
     value = raw_value.strip().lower()
     if value not in STATUS_ORDER:
         raise CliError("Status must be one of: {0}.".format(", ".join(STATUS_ORDER)))
+    return value
+
+
+def normalize_optional_text(raw_value: str, field_name: str) -> str:
+    value = raw_value.strip()
+    if "\n" in value:
+        raise CliError("{0} must be a single-line value.".format(field_name))
     return value
 
 
@@ -230,6 +287,8 @@ def row_to_entry(row: sqlite3.Row) -> Dict[str, Any]:
         "date": row["work_date"],
         "task": row["task"],
         "status": row["status"],
+        "project": row["project"],
+        "category": row["category"],
         "details": row["details"],
         "created_at": row["created_at"],
     }
@@ -245,6 +304,8 @@ def history_row_to_version(row: sqlite3.Row) -> Dict[str, Any]:
         "date": row["work_date"],
         "task": row["task"],
         "status": row["status"],
+        "project": row["project"],
+        "category": row["category"],
         "details": row["details"],
         "created_at": row["created_at"],
         "changed_at": row["changed_at"],
@@ -254,7 +315,7 @@ def history_row_to_version(row: sqlite3.Row) -> Dict[str, Any]:
 def fetch_entry_row(connection: sqlite3.Connection, entry_id: int) -> sqlite3.Row:
     row = connection.execute(
         """
-        SELECT id, work_date, task, status, details, created_at
+        SELECT id, work_date, task, status, project, category, details, created_at
         FROM work_entries
         WHERE id = ?
         """,
@@ -268,6 +329,11 @@ def fetch_entry_row(connection: sqlite3.Connection, entry_id: int) -> sqlite3.Ro
 def status_counts(entries: Iterable[Dict[str, Any]]) -> Dict[str, int]:
     counter = Counter(entry["status"] for entry in entries)
     return {status: counter.get(status, 0) for status in STATUS_ORDER}
+
+
+def value_counts(items: Iterable[Dict[str, Any]], field_name: str) -> Dict[str, int]:
+    counter = Counter(item[field_name] for item in items if item.get(field_name))
+    return dict(sorted(counter.items()))
 
 
 def history_action_counts(versions: Iterable[Dict[str, Any]]) -> Dict[str, int]:
@@ -309,11 +375,13 @@ def insert_history_snapshot(
             work_date,
             task,
             status,
+            project,
+            category,
             details,
             created_at,
             changed_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             entry["id"],
@@ -323,6 +391,8 @@ def insert_history_snapshot(
             entry["date"],
             entry["task"],
             entry["status"],
+            entry["project"],
+            entry["category"],
             entry["details"],
             entry["created_at"],
             timestamp,
@@ -330,7 +400,7 @@ def insert_history_snapshot(
     )
     history_row = connection.execute(
         """
-        SELECT history_id, entry_id, version, action, source_command, work_date, task, status, details, created_at, changed_at
+        SELECT history_id, entry_id, version, action, source_command, work_date, task, status, project, category, details, created_at, changed_at
         FROM work_entry_history
         WHERE entry_id = ? AND version = ?
         """,
@@ -347,7 +417,7 @@ def fetch_entries_in_range(
     with connect_db(db_path) as connection:
         rows = connection.execute(
             """
-            SELECT id, work_date, task, status, details, created_at
+            SELECT id, work_date, task, status, project, category, details, created_at
             FROM work_entries
             WHERE work_date BETWEEN ? AND ?
             ORDER BY work_date ASC, created_at ASC, id ASC
@@ -369,13 +439,15 @@ def record_entries(
         for item in items:
             cursor = connection.execute(
                 """
-                INSERT INTO work_entries (work_date, task, status, details, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO work_entries (work_date, task, status, project, category, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     work_date.isoformat(),
                     item["task"],
                     item["status"],
+                    item["project"],
+                    item["category"],
                     item["details"],
                     created_at,
                 ),
@@ -386,6 +458,8 @@ def record_entries(
                     "date": work_date.isoformat(),
                     "task": item["task"],
                     "status": item["status"],
+                    "project": item["project"],
+                    "category": item["category"],
                     "details": item["details"],
                     "created_at": created_at,
                 }
@@ -420,7 +494,7 @@ def replace_day_entries(
             row_to_entry(row)
             for row in connection.execute(
                 """
-                SELECT id, work_date, task, status, details, created_at
+                SELECT id, work_date, task, status, project, category, details, created_at
                 FROM work_entries
                 WHERE work_date = ?
                 ORDER BY created_at ASC, id ASC
@@ -457,13 +531,15 @@ def replace_day_entries(
         for item in items:
             cursor = connection.execute(
                 """
-                INSERT INTO work_entries (work_date, task, status, details, created_at)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO work_entries (work_date, task, status, project, category, details, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     work_date.isoformat(),
                     item["task"],
                     item["status"],
+                    item["project"],
+                    item["category"],
                     item["details"],
                     created_at,
                 ),
@@ -474,6 +550,8 @@ def replace_day_entries(
                     "date": work_date.isoformat(),
                     "task": item["task"],
                     "status": item["status"],
+                    "project": item["project"],
+                    "category": item["category"],
                     "details": item["details"],
                     "created_at": created_at,
                 }
@@ -503,20 +581,32 @@ def update_entry(
     new_date: Optional[str],
     task: Optional[str],
     status: Optional[str],
+    project: Optional[str],
+    clear_project: bool,
+    category: Optional[str],
+    clear_category: bool,
     details: Optional[str],
     clear_details: bool,
 ) -> Dict[str, Any]:
+    if project is not None and clear_project:
+        raise CliError("Use either --project or --clear-project, not both.")
+    if category is not None and clear_category:
+        raise CliError("Use either --category or --clear-category, not both.")
     if details is not None and clear_details:
         raise CliError("Use either --details or --clear-details, not both.")
     if (
         new_date is None
         and task is None
         and status is None
+        and project is None
+        and not clear_project
+        and category is None
+        and not clear_category
         and details is None
         and not clear_details
     ):
         raise CliError(
-            "update-entry requires at least one change: --new-date, --task, --status, --details, or --clear-details."
+            "update-entry requires at least one change: --new-date, --task, --status, --project, --clear-project, --category, --clear-category, --details, or --clear-details."
         )
 
     with connect_db(db_path) as connection:
@@ -537,23 +627,39 @@ def update_entry(
             if status is not None
             else previous_entry["status"]
         )
+        if clear_project:
+            updated_project = ""
+        elif project is not None:
+            updated_project = normalize_optional_text(project, "Project")
+        else:
+            updated_project = previous_entry["project"]
+
+        if clear_category:
+            updated_category = ""
+        elif category is not None:
+            updated_category = normalize_optional_text(category, "Category")
+        else:
+            updated_category = previous_entry["category"]
+
         if clear_details:
             updated_details = ""
         elif details is not None:
-            updated_details = details.strip()
+            updated_details = normalize_optional_text(details, "Details")
         else:
             updated_details = previous_entry["details"]
 
         connection.execute(
             """
             UPDATE work_entries
-            SET work_date = ?, task = ?, status = ?, details = ?
+            SET work_date = ?, task = ?, status = ?, project = ?, category = ?, details = ?
             WHERE id = ?
             """,
             (
                 updated_date,
                 updated_task,
                 updated_status,
+                updated_project,
+                updated_category,
                 updated_details,
                 entry_id,
             ),
@@ -613,7 +719,7 @@ def build_entry_history(
     with connect_db(db_path) as connection:
         history_rows = connection.execute(
             """
-            SELECT history_id, entry_id, version, action, source_command, work_date, task, status, details, created_at, changed_at
+            SELECT history_id, entry_id, version, action, source_command, work_date, task, status, project, category, details, created_at, changed_at
             FROM work_entry_history
             WHERE entry_id = ?
             ORDER BY version ASC, history_id ASC
@@ -624,7 +730,7 @@ def build_entry_history(
             raise CliError("No history was found for entry id {0}.".format(entry_id))
         current_row = connection.execute(
             """
-            SELECT 1
+            SELECT id, work_date, task, status, project, category, details, created_at
             FROM work_entries
             WHERE id = ?
             """,
@@ -637,7 +743,10 @@ def build_entry_history(
         "db_path": str(db_path),
         "entry_id": entry_id,
         "current_exists": current_row is not None,
+        "current_entry": row_to_entry(current_row) if current_row is not None else None,
         "version_count": len(versions),
+        "project_counts": value_counts(versions, "project"),
+        "category_counts": value_counts(versions, "category"),
         "versions": versions,
     }
 
@@ -649,7 +758,7 @@ def build_day_history(
     with connect_db(db_path) as connection:
         history_rows = connection.execute(
             """
-            SELECT history_id, entry_id, version, action, source_command, work_date, task, status, details, created_at, changed_at
+            SELECT history_id, entry_id, version, action, source_command, work_date, task, status, project, category, details, created_at, changed_at
             FROM work_entry_history
             WHERE work_date = ?
             ORDER BY entry_id ASC, version ASC, history_id ASC
@@ -666,7 +775,7 @@ def build_day_history(
         for entry_id, versions in grouped_versions.items():
             current_row = connection.execute(
                 """
-                SELECT id, work_date, task, status, details, created_at
+                SELECT id, work_date, task, status, project, category, details, created_at
                 FROM work_entries
                 WHERE id = ?
                 """,
@@ -679,6 +788,8 @@ def build_day_history(
                     "current_entry": row_to_entry(current_row) if current_row is not None else None,
                     "version_count": len(versions),
                     "action_counts": history_action_counts(versions),
+                    "project_counts": value_counts(versions, "project"),
+                    "category_counts": value_counts(versions, "category"),
                     "versions": versions,
                 }
             )
@@ -691,6 +802,8 @@ def build_day_history(
         "entry_count": len(entries),
         "version_count": len(all_versions),
         "action_counts": history_action_counts(all_versions),
+        "project_counts": value_counts(all_versions, "project"),
+        "category_counts": value_counts(all_versions, "category"),
         "entries": entries,
     }
 
@@ -703,6 +816,8 @@ def build_day_report(db_path: Path, work_date: date) -> Dict[str, Any]:
         "date": work_date.isoformat(),
         "entry_count": len(entries),
         "status_counts": status_counts(entries),
+        "project_counts": value_counts(entries, "project"),
+        "category_counts": value_counts(entries, "category"),
         "entries": entries,
     }
 
@@ -728,6 +843,8 @@ def build_week_report(db_path: Path, anchor_date: date) -> Dict[str, Any]:
                 "date": current_day.isoformat(),
                 "entry_count": len(day_entries),
                 "status_counts": status_counts(day_entries),
+                "project_counts": value_counts(day_entries, "project"),
+                "category_counts": value_counts(day_entries, "category"),
                 "entries": day_entries,
             }
         )
@@ -740,6 +857,8 @@ def build_week_report(db_path: Path, anchor_date: date) -> Dict[str, Any]:
         "week_end": week_end.isoformat(),
         "entry_count": len(entries),
         "status_counts": status_counts(entries),
+        "project_counts": value_counts(entries, "project"),
+        "category_counts": value_counts(entries, "category"),
         "days": days,
     }
 
@@ -825,6 +944,24 @@ def build_parser() -> argparse.ArgumentParser:
     update_entry_parser.add_argument(
         "--status",
         help="Replace the status for this entry.",
+    )
+    update_entry_parser.add_argument(
+        "--project",
+        help="Replace the project for this entry.",
+    )
+    update_entry_parser.add_argument(
+        "--clear-project",
+        action="store_true",
+        help="Clear any existing project for this entry.",
+    )
+    update_entry_parser.add_argument(
+        "--category",
+        help="Replace the category for this entry.",
+    )
+    update_entry_parser.add_argument(
+        "--clear-category",
+        action="store_true",
+        help="Clear any existing category for this entry.",
     )
     update_entry_parser.add_argument(
         "--details",
@@ -917,6 +1054,10 @@ def run_command(arguments: argparse.Namespace) -> Dict[str, Any]:
             new_date=getattr(arguments, "new_date", None),
             task=getattr(arguments, "task", None),
             status=getattr(arguments, "status", None),
+            project=getattr(arguments, "project", None),
+            clear_project=getattr(arguments, "clear_project", False),
+            category=getattr(arguments, "category", None),
+            clear_category=getattr(arguments, "clear_category", False),
             details=getattr(arguments, "details", None),
             clear_details=getattr(arguments, "clear_details", False),
         )
