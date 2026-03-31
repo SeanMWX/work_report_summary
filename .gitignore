@@ -1,0 +1,10 @@
+skill_creator/
+__pycache__/
+*.py[cod]
+*.skill
+.tmp_init/
+dist/
+test/data/
+*.db
+*.sqlite
+*.sqlite3
